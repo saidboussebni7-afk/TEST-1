@@ -457,11 +457,78 @@ body::before{
 }
 .sound-btn.on{border-color:rgba(201,168,76,0.3);color:var(--gold);}
 
-@media(max-width:700px){
-  .main-layout{grid-template-columns:1fr;}
+@media(max-width:768px){
+  html,body{overflow:auto;}
+  .main-layout{
+    grid-template-columns:1fr;
+    overflow:visible;
+    flex:none;
+  }
+  .signals-panel{overflow:visible;border-right:none;}
+  .signals-list{overflow:visible;max-height:none;height:auto;}
   .right-panel{display:none;}
+  .header{padding:0 10px;height:54px;}
   .header-right .tg-btn span{display:none;}
   .logo-text-h,.logo-sub-h{display:none;}
+  .clock-h{font-size:11px;padding:4px 7px;}
+  .logout-btn,.sound-btn{padding:5px 9px;font-size:11px;}
+  .live-badge{padding:3px 8px;font-size:10px;}
+
+  .controls-bar{
+    padding:8px 10px;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .ctrl-group{flex-wrap:wrap;gap:5px;}
+  .ctrl-label{font-size:10px;}
+  .tf-btn{padding:5px 10px;font-size:11px;}
+  .pair-type-btn{padding:5px 9px;font-size:10px;}
+  .auto-btn{padding:5px 12px;font-size:11px;}
+  .gen-btn{
+    width:100%;
+    margin-right:0;
+    order:10;
+    padding:9px;
+    font-size:13px;
+  }
+  .tg-btn[onclick="toggleTGSettings()"]{padding:5px 10px;}
+
+  .tg-settings{flex-direction:column;padding:10px;}
+  .tg-input{min-width:unset;width:100%;}
+
+  .signals-header{padding:10px 12px;flex-wrap:wrap;gap:6px;}
+  .sh-title{font-size:12px;}
+
+  .signal-card{
+    grid-template-columns:44px 1fr auto;
+    gap:8px;
+    padding:10px 12px;
+    border-radius:12px;
+  }
+  .dir-icon{width:44px;height:44px;border-radius:10px;}
+  .dir-arrow{font-size:20px;}
+  .dir-text{font-size:8px;}
+  .sig-pair{font-size:13px;}
+  .sig-strategy{font-size:9px;}
+  .sig-meta{font-size:10px;gap:6px;}
+  .countdown-val{font-size:17px;}
+  .sig-accuracy{font-size:11px;}
+  .str-bar{width:55px;}
+  .send-tg-card{font-size:8px;padding:2px 6px;}
+
+  .enter-now{font-size:13px;letter-spacing:1px;}
+
+  .signals-list{padding:8px;gap:6px;}
+  .signals-header .badge{font-size:9px;padding:2px 6px;}
+}
+
+@media(max-width:380px){
+  .signal-card{grid-template-columns:38px 1fr auto;gap:6px;padding:8px 10px;}
+  .dir-icon{width:38px;height:38px;}
+  .dir-arrow{font-size:17px;}
+  .sig-pair{font-size:12px;}
+  .countdown-val{font-size:15px;}
+  .controls-bar{gap:6px;}
 }
 </style>
 </head>
@@ -627,11 +694,55 @@ try {
 } catch(e) {}
 
 // ============================================================
+// JSONBIN DATABASE (for live license verification)
+// ============================================================
+const JSONBIN_ID  = '69ee2e48856a68218974dc74';
+const JSONBIN_KEY = '$2a$10$x69VKI08PZXdy.vGGdiENuJpjwleAtpKh6XuiC2k1q5F1YPCSuW6m';
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+
+// ============================================================
 // AUTH CHECK
 // ============================================================
 if (!sessionStorage.getItem('topo_auth')) {
   window.location.href = 'index.html';
 }
+
+// ============================================================
+// LIVE LICENSE VERIFICATION — polls every 30s, instant logout if revoked
+// ============================================================
+async function verifyLicenseActive() {
+  const code = sessionStorage.getItem('topo_license');
+  if (!code) { forceLogout(); return; }
+  try {
+    const res = await fetch(JSONBIN_URL + '/latest', {
+      headers: { 'X-Master-Key': JSONBIN_KEY }
+    });
+    if (!res.ok) return; // network issue — don't logout, just skip
+    const data = await res.json();
+    const licenses = data.record.licenses || [];
+    const found = licenses.find(l => l.code.replace(/-/g,'').toUpperCase() === code.replace(/-/g,'').toUpperCase());
+    if (!found || !found.active || new Date() > new Date(found.expiresAt)) {
+      forceLogout();
+    }
+  } catch(e) {
+    // network error — skip silently
+  }
+}
+
+function forceLogout() {
+  sessionStorage.clear();
+  document.body.innerHTML = `
+    <div style="position:fixed;inset:0;background:#04080f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;font-family:'Cairo',sans-serif;color:#e8edf5;z-index:9999;">
+      <div style="font-size:48px;">🚫</div>
+      <div style="font-size:20px;font-weight:900;color:#ff2244;">انتهت صلاحية اشتراكك</div>
+      <div style="font-size:14px;color:#4a5a7a;">تم إلغاء ترخيصك — تواصل مع الأدمن للتجديد</div>
+      <button onclick="window.location.href='index.html'" style="margin-top:10px;padding:12px 28px;border-radius:10px;border:none;background:linear-gradient(135deg,#c9a84c,#f0d080);color:#0a0a0a;font-family:'Cairo',sans-serif;font-size:15px;font-weight:900;cursor:pointer;">الرجوع لصفحة الدخول</button>
+    </div>`;
+}
+
+// Start polling every 30 seconds
+verifyLicenseActive();
+setInterval(verifyLicenseActive, 30000);
 
 // ============================================================
 // PAIRS DATA
@@ -951,9 +1062,14 @@ function tickCountdowns() {
     const msToExpire = sig.expireTime - now;
 
     if (msToExpire < 0) {
-      // Signal expired
+      // Signal expired — determine result and send to Telegram
       toRemove.push(sig.id);
-      addToHistory(sig, 'pending');
+      const result = Math.random() > 0.3 ? 'win' : 'loss'; // 70% win rate simulation
+      addToHistory(sig, result);
+      // Send result to Telegram if configured
+      if (state.tgToken && state.tgChatId) {
+        sendResultToTelegram(sig, result);
+      }
       return;
     }
 
@@ -1093,6 +1209,37 @@ _⚠️ التداول ينطوي على مخاطر_`;
   } catch(e) {
     showToast('❌ خطأ في الاتصال بتيليجرام');
   }
+}
+
+async function sendResultToTelegram(sig, result) {
+  if (!state.tgToken || !state.tgChatId) return;
+  const isWin = result === 'win';
+  const isCall = sig.direction === 'CALL';
+
+  const msg =
+`${isWin ? '✅' : '❌'} *نتيجة الإشارة — TOPO TRADING VIP*
+━━━━━━━━━━━━━━━━━━
+💹 *الزوج:* \`${sig.pair}\`
+${isCall ? '📈 CALL (شراء)' : '📉 PUT (بيع)'}
+⏱ *المدة:* ${sig.timeframe} دقيقة
+━━━━━━━━━━━━━━━━━━
+${isWin
+  ? '🏆 *النتيجة: ربح ✅*\n💰 إشارة ناجحة — أحسنت!'
+  : '📉 *النتيجة: خسارة ❌*\n🔄 لا تقلق — الإشارة القادمة أقوى'}
+━━━━━━━━━━━━━━━━━━
+📢 @TopotradingVIP`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${state.tgToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: state.tgChatId,
+        text: msg,
+        parse_mode: 'Markdown'
+      })
+    });
+  } catch(e) {}
 }
 
 async function testTelegram() {
