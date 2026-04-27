@@ -908,7 +908,7 @@ function renderSignals() {
 
     return `
     <div class="signal-card ${isCall ? 'call' : 'put'} new-flash" id="card_${sig.id}">
-      <button class="send-tg-card" onclick="sendToTelegram(getSignal('${sig.id}'));event.stopPropagation()">
+      <button class="send-tg-card" onclick="manualSendToTelegram('${sig.id}');event.stopPropagation()">
         ✈️ إرسال
       </button>
 
@@ -1104,6 +1104,18 @@ ${channelTag}`;
   processQueue(); // send next signal in queue
 }
 
+
+function manualSendToTelegram(id) {
+  const sig = getSignal(id);
+  if (!sig) return;
+  if (!state.tgToken || !state.tgChatId) {
+    showToast('⚠️ اضبط إعدادات تيليجرام أولاً');
+    toggleTGSettings();
+    return;
+  }
+  enqueueTelegram(sig);
+  showToast(`📤 تمت إضافة ${sig.pair} لقائمة الإرسال`);
+}
 
 async function sendToTelegram(sig) {
   if (!sig) return;
