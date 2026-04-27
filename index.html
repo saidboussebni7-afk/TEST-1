@@ -542,13 +542,33 @@ document.getElementById('licenseInput').addEventListener('keypress', function(e)
 });
 
 // ============================================================
+// DEVICE ID
+// ============================================================
+function getDeviceId() {
+  let id = localStorage.getItem('topo_device_id');
+  if (!id) {
+    id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('topo_device_id', id);
+  }
+  return id;
+}
+
+async function saveLicenses(licenses) {
+  const res = await fetch(JSONBIN_URL, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+    body: JSON.stringify({ licenses })
+  });
+  if (!res.ok) throw new Error('فشل حفظ البيانات');
+}
+
+// ============================================================
 // LICENSE CHECK
 // ============================================================
 async function checkLicense() {
   const raw = document.getElementById('licenseInput').value.trim();
   const code = raw.replace(/-/g, '').toUpperCase();
   const btn = document.getElementById('loginBtn');
-  const msg = document.getElementById('statusMsg');
 
   if (code.length < 8) {
     showMsg('error', '❌ يرجى إدخال كود صحيح');
@@ -561,37 +581,59 @@ async function checkLicense() {
 
   try {
     const licenses = await getLicenses();
-    const found = licenses.find(l => l.code.replace(/-/g,'').toUpperCase() === code);
+    const idx = licenses.findIndex(l => l.code.replace(/-/g,'').toUpperCase() === code);
 
-    if (!found) {
+    if (idx === -1) {
       showMsg('error', '❌ الكود غير موجود — تواصل معنا على تيليجرام');
-      btn.disabled = false;
-      btn.innerHTML = 'دخول المنصة';
-      return;
+      btn.disabled = false; btn.innerHTML = 'دخول المنصة'; return;
     }
+
+    const found = licenses[idx];
 
     if (!found.active) {
       showMsg('error', '🚫 هذا الكود تم إيقافه — تواصل مع الأدمن');
-      btn.disabled = false;
-      btn.innerHTML = 'دخول المنصة';
-      return;
+      btn.disabled = false; btn.innerHTML = 'دخول المنصة'; return;
     }
 
     const now = new Date();
     const expires = new Date(found.expiresAt);
     if (now > expires) {
       showMsg('error', '⏰ انتهت صلاحية الكود — جدد اشتراكك');
-      btn.disabled = false;
-      btn.innerHTML = 'دخول المنصة';
-      return;
+      btn.disabled = false; btn.innerHTML = 'دخول المنصة'; return;
+    }
+
+    // ── Device enforcement ──
+    const deviceId = getDeviceId();
+    const devices = Array.isArray(found.devices) ? found.devices : [];
+    const maxUsers = found.maxUsers || 1;
+
+    const alreadyRegistered = devices.includes(deviceId);
+
+    if (!alreadyRegistered) {
+      if (devices.length >= maxUsers) {
+        showMsg('error', `🚫 تم الوصول للحد الأقصى من الأجهزة (${maxUsers}) — تواصل مع الأدمن`);
+        btn.disabled = false; btn.innerHTML = 'دخول المنصة'; return;
+      }
+      // Register this device
+      devices.push(deviceId);
+      licenses[idx] = {
+        ...found,
+        devices,
+        currentUsers: devices.length,
+        lastLogin: new Date().toISOString()
+      };
+      await saveLicenses(licenses);
+    } else {
+      // Already registered — just update lastLogin
+      licenses[idx] = { ...found, lastLogin: new Date().toISOString() };
+      await saveLicenses(licenses);
     }
 
     handleSuccess(code, expires);
 
   } catch(err) {
     showMsg('error', '⚠️ خطأ في الاتصال — تحقق من الإنترنت');
-    btn.disabled = false;
-    btn.innerHTML = 'دخول المنصة';
+    btn.disabled = false; btn.innerHTML = 'دخول المنصة';
     console.error(err);
   }
 }
@@ -602,16 +644,6 @@ function handleSuccess(code, expires) {
   sessionStorage.setItem('topo_auth', 'true');
   sessionStorage.setItem('topo_expires', expires instanceof Date ? expires.toISOString() : new Date(expires).toISOString());
   setTimeout(() => { window.location.href = 'signals.html'; }, 1200);
-}
-
-
-function getDeviceId() {
-  let id = localStorage.getItem('topo_device_id');
-  if (!id) {
-    id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-    localStorage.setItem('topo_device_id', id);
-  }
-  return id;
 }
 
 function showMsg(type, text) {
