@@ -550,9 +550,9 @@ body::before{
     <div class="live-badge"><div class="live-dot"></div>مباشر</div>
     <div class="clock-h" id="clock">00:00:00</div>
     <button class="sound-btn on" id="soundBtn" onclick="toggleSound()" title="الصوت">🔊</button>
-    <a href="https://t.me/TopotradingVIP" target="_blank" class="tg-btn">
+    <a href="https://t.me/TopotradingVIP" target="_blank" class="tg-btn" id="tgChannelBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="#29b6f6"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.018 9.504c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.881.717z"/></svg>
-      <span>القناة</span>
+      <span id="tgChannelBtnLabel">القناة</span>
     </a>
     <button class="logout-btn" onclick="logout()">خروج</button>
   </div>
@@ -596,6 +596,10 @@ body::before{
   <input type="text" class="tg-input" id="botToken" placeholder="1234567890:ABCdef..." style="flex:1;min-width:250px;">
   <span class="ctrl-label">📢 Chat/Channel ID:</span>
   <input type="text" class="tg-input" id="chatId" placeholder="-1001234567890" style="width:180px;">
+  <span class="ctrl-label">🏷️ اسم القناة:</span>
+  <input type="text" class="tg-input" id="channelName" placeholder="@YourChannel" style="width:160px;" dir="ltr">
+  <span class="ctrl-label">🔗 رابط القناة:</span>
+  <input type="text" class="tg-input" id="channelLink" placeholder="https://t.me/YourChannel" style="width:200px;" dir="ltr">
   <button class="save-tg-btn" onclick="saveTGSettings()">💾 حفظ</button>
   <span class="tg-toggle-saved" id="tgSaved">✅ تم الحفظ</span>
   <button class="tg-btn" onclick="testTelegram()" style="padding:7px 14px;font-size:11px;">🧪 اختبار</button>
@@ -783,6 +787,11 @@ let state = {
   countdownTimers: {},
   tgToken: '',
   tgChatId: '',
+  tgChannelName: '@TopotradingVIP',
+  tgChannelLink: 'https://t.me/TopotradingVIP',
+  // Telegram queue: ensures one signal at a time, waits for result before next
+  tgQueue: [],
+  tgActiveSignalId: null, // ID of signal currently sent to Telegram, waiting for result
 };
 
 // ============================================================
@@ -792,8 +801,19 @@ function init() {
   // Load TG settings
   state.tgToken = localStorage.getItem('topo_tg_token') || '';
   state.tgChatId = localStorage.getItem('topo_tg_chat') || '';
+  state.tgChannelName = localStorage.getItem('topo_tg_channel_name') || '@TopotradingVIP';
+  state.tgChannelLink = localStorage.getItem('topo_tg_channel_link') || 'https://t.me/TopotradingVIP';
   if (state.tgToken) document.getElementById('botToken').value = state.tgToken;
   if (state.tgChatId) document.getElementById('chatId').value = state.tgChatId;
+  document.getElementById('channelName').value = state.tgChannelName;
+  document.getElementById('channelLink').value = state.tgChannelLink;
+  // Update header channel button
+  const tgBtn = document.getElementById('tgChannelBtn');
+  if (tgBtn) {
+    tgBtn.href = state.tgChannelLink;
+    const lbl = document.getElementById('tgChannelBtnLabel');
+    if (lbl) lbl.textContent = state.tgChannelName || 'القناة';
+  }
 
   // Load history from localStorage
   const saved = localStorage.getItem('topo_history');
@@ -845,8 +865,8 @@ function toggleAuto() {
     document.getElementById('autoBtnText').textContent = 'إيقاف';
     // Generate every N minutes
     const interval = state.timeframe * 60 * 1000;
-    generateNow();
-    state.autoInterval = setInterval(generateNow, interval);
+    generateNow(true);
+    state.autoInterval = setInterval(() => generateNow(true), interval);
     showToast('🤖 الوضع التلقائي مفعّل');
   } else {
     btn.classList.add('paused');
@@ -865,8 +885,19 @@ function toggleTGSettings() {
 function saveTGSettings() {
   state.tgToken = document.getElementById('botToken').value.trim();
   state.tgChatId = document.getElementById('chatId').value.trim();
+  state.tgChannelName = document.getElementById('channelName').value.trim() || '@TopotradingVIP';
+  state.tgChannelLink = document.getElementById('channelLink').value.trim() || 'https://t.me/TopotradingVIP';
   localStorage.setItem('topo_tg_token', state.tgToken);
   localStorage.setItem('topo_tg_chat', state.tgChatId);
+  localStorage.setItem('topo_tg_channel_name', state.tgChannelName);
+  localStorage.setItem('topo_tg_channel_link', state.tgChannelLink);
+  // Update header channel button live
+  const tgBtn = document.getElementById('tgChannelBtn');
+  if (tgBtn) {
+    tgBtn.href = state.tgChannelLink;
+    const lbl = document.getElementById('tgChannelBtnLabel');
+    if (lbl) lbl.textContent = state.tgChannelName || 'القناة';
+  }
   const saved = document.getElementById('tgSaved');
   saved.style.display = 'inline';
   setTimeout(() => saved.style.display = 'none', 3000);
@@ -946,7 +977,7 @@ function generateSignal() {
   return signal;
 }
 
-function generateNow() {
+function generateNow(isAuto) {
   const count = state.pairType === 'all' ? 3 : 2;
   const newSigs = [];
   for (let i = 0; i < count; i++) {
@@ -970,9 +1001,9 @@ function generateNow() {
   const best = newSigs[0];
   showToast(`🔔 إشارة جديدة: ${best.pair} — ${best.direction}`);
 
-  // Auto send to Telegram
-  if (state.tgToken && state.tgChatId) {
-    newSigs.forEach(s => sendToTelegram(s));
+  // Only auto mode signals go to Telegram (queued one-by-one)
+  if (isAuto && state.tgToken && state.tgChatId) {
+    newSigs.forEach(s => enqueueTelegram(s));
   }
 
   // Save to Firestore
@@ -1066,9 +1097,12 @@ function tickCountdowns() {
       toRemove.push(sig.id);
       const result = Math.random() > 0.3 ? 'win' : 'loss'; // 70% win rate simulation
       addToHistory(sig, result);
-      // Send result to Telegram if configured
-      if (state.tgToken && state.tgChatId) {
+      // Send result to Telegram only if this was the active queued signal
+      if (state.tgToken && state.tgChatId && state.tgActiveSignalId === sig.id) {
         sendResultToTelegram(sig, result);
+        state.tgActiveSignalId = null;
+        // Allow next queued signal to be sent after result delivered
+        setTimeout(() => processNextTelegramQueue(), 2000);
       }
       return;
     }
@@ -1156,6 +1190,27 @@ function updateHeaderBadges() {
 }
 
 // ============================================================
+// TELEGRAM QUEUE — one signal at a time, waits for result
+// ============================================================
+function enqueueTelegram(sig) {
+  // Don't add duplicates
+  if (state.tgQueue.find(s => s.id === sig.id)) return;
+  state.tgQueue.push(sig);
+  // If nothing is currently active, process immediately
+  if (!state.tgActiveSignalId) {
+    processNextTelegramQueue();
+  }
+}
+
+function processNextTelegramQueue() {
+  if (state.tgActiveSignalId) return; // already waiting
+  if (state.tgQueue.length === 0) return;
+  const next = state.tgQueue.shift();
+  state.tgActiveSignalId = next.id;
+  sendToTelegram(next);
+}
+
+// ============================================================
 // TELEGRAM SENDER
 // ============================================================
 async function sendToTelegram(sig) {
@@ -1165,6 +1220,9 @@ async function sendToTelegram(sig) {
     toggleTGSettings();
     return;
   }
+
+  const channelTag = state.tgChannelName || '@TopotradingVIP';
+  const channelUrl = state.tgChannelLink || 'https://t.me/TopotradingVIP';
 
   const isCall = sig.direction === 'CALL';
   const emoji = isCall ? '📈' : '📉';
@@ -1186,7 +1244,7 @@ ${dirAr}
 ━━━━━━━━━━━━━━━━━━
 🎯 *سجّل في Pocket Option:*
 [احصل على بونص 50%](https://po-ru1.click/register?utm_campaign=801367&utm_source=affiliate&utm_medium=sr&a=cdMx4feSVrHSxW&ac=topovip&code=50START)
-📢 @TopotradingVIP
+📢 ${channelTag}
 _⚠️ التداول ينطوي على مخاطر_`;
 
   try {
@@ -1205,9 +1263,18 @@ _⚠️ التداول ينطوي على مخاطر_`;
       showToast(`✅ تم إرسال إشارة ${sig.pair} للقناة`);
     } else {
       showToast('❌ فشل الإرسال: ' + (data.description || 'تحقق من الإعدادات'));
+      // On failure, release the active slot so queue can continue
+      if (state.tgActiveSignalId === sig.id) {
+        state.tgActiveSignalId = null;
+        setTimeout(() => processNextTelegramQueue(), 3000);
+      }
     }
   } catch(e) {
     showToast('❌ خطأ في الاتصال بتيليجرام');
+    if (state.tgActiveSignalId === sig.id) {
+      state.tgActiveSignalId = null;
+      setTimeout(() => processNextTelegramQueue(), 3000);
+    }
   }
 }
 
@@ -1215,6 +1282,7 @@ async function sendResultToTelegram(sig, result) {
   if (!state.tgToken || !state.tgChatId) return;
   const isWin = result === 'win';
   const isCall = sig.direction === 'CALL';
+  const channelTag = state.tgChannelName || '@TopotradingVIP';
 
   const msg =
 `${isWin ? '✅' : '❌'} *نتيجة الإشارة — TOPO TRADING VIP*
@@ -1227,7 +1295,7 @@ ${isWin
   ? '🏆 *النتيجة: ربح ✅*\n💰 إشارة ناجحة — أحسنت!'
   : '📉 *النتيجة: خسارة ❌*\n🔄 لا تقلق — الإشارة القادمة أقوى'}
 ━━━━━━━━━━━━━━━━━━
-📢 @TopotradingVIP`;
+📢 ${channelTag}`;
 
   try {
     await fetch(`https://api.telegram.org/bot${state.tgToken}/sendMessage`, {
@@ -1245,8 +1313,9 @@ ${isWin
 async function testTelegram() {
   state.tgToken = document.getElementById('botToken').value.trim();
   state.tgChatId = document.getElementById('chatId').value.trim();
+  const channelTag = document.getElementById('channelName').value.trim() || '@TopotradingVIP';
 
-  const msg = `✅ *TOPO TRADING VIP*\n\nتم ربط البوت بنجاح! 🎉\n📢 @TopotradingVIP`;
+  const msg = `✅ *TOPO TRADING VIP*\n\nتم ربط البوت بنجاح! 🎉\n📢 ${channelTag}`;
   try {
     const res = await fetch(`https://api.telegram.org/bot${state.tgToken}/sendMessage`, {
       method: 'POST',
