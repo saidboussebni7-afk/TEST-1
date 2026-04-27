@@ -802,7 +802,7 @@ function renderLicenses(licenses) {
           ${daysLeft > 0 ? `بقي ${daysLeft} يوم` : 'منتهي'}
         </div>
       </td>
-      <td><span style="color:var(--cyan)">${lic.currentUsers || 0}</span> / ${lic.maxUsers}</td>
+      <td><span style="color:var(--cyan)">${(lic.devices||[]).length}</span> / ${lic.maxUsers}</td>
       <td style="color:var(--muted);font-size:11px">${lic.note || '-'}</td>
       <td style="font-size:11px;color:var(--muted)">${lastLogin}</td>
       <td>
@@ -812,6 +812,7 @@ function renderLicenses(licenses) {
             : `<button class="action-btn ab-green" onclick="enableLicense('${lic.code || lic.id}',${i})">تفعيل</button>`
           }
           <button class="action-btn ab-blue" onclick="extendLicense('${lic.code || lic.id}',${i})">تمديد</button>
+          <button class="action-btn" style="background:rgba(255,196,0,0.1);color:#ffc400;border:1px solid rgba(255,196,0,0.2)" onclick="resetDevices('${lic.code || lic.id}')">🔄 أجهزة</button>
           <button class="action-btn ab-red" onclick="deleteLicense('${lic.code || lic.id}',${i})">حذف</button>
         </div>
       </td>
@@ -823,7 +824,7 @@ function updateOverview(licenses) {
   const now = new Date();
   const active = licenses.filter(l => l.active && new Date(l.expiresAt) > now).length;
   const expired = licenses.filter(l => !l.active || new Date(l.expiresAt) <= now).length;
-  const totalUsers = licenses.reduce((a, b) => a + (b.currentUsers || 0), 0);
+  const totalUsers = licenses.reduce((a, b) => a + (Array.isArray(b.devices) ? b.devices.length : (b.currentUsers || 0)), 0);
 
   document.getElementById('ovTotal').textContent = licenses.length;
   document.getElementById('ovActive').textContent = active;
@@ -834,6 +835,13 @@ function updateOverview(licenses) {
 // ============================================================
 // LICENSE ACTIONS
 // ============================================================
+async function resetDevices(code) {
+  if (!confirm('إعادة تعيين الأجهزة المسجّلة لهذا الكود؟ سيسمح لأجهزة جديدة بالدخول.')) return;
+  await updateLicenseField(code, { devices: [], currentUsers: 0 });
+  showToast('🔄 تم إعادة تعيين الأجهزة');
+  loadLicenses();
+}
+
 async function disableLicense(code, i) {
   await updateLicenseField(code, { active: false });
   showToast('🟡 تم إيقاف الكود');
